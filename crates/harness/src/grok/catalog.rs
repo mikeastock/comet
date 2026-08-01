@@ -16,18 +16,13 @@ pub(crate) const REASONING_LEVELS: &[ReasoningLevel] = &[
 ];
 
 /// Map a Comet reasoning level to the CLI `--reasoning-effort` value.
-/// Unlisted levels clamp to the nearest supported effort.
 pub(crate) fn to_effort(reasoning: Option<ReasoningLevel>) -> Option<&'static str> {
-    Some(match reasoning? {
-        ReasoningLevel::Minimal | ReasoningLevel::Low => "low",
-        ReasoningLevel::Medium => "medium",
-        ReasoningLevel::High
-        | ReasoningLevel::XHigh
-        | ReasoningLevel::Max
-        | ReasoningLevel::Ultra
-        | ReasoningLevel::Ultracode
-        | ReasoningLevel::Ultrathink => "high",
-    })
+    match reasoning {
+        Some(ReasoningLevel::Low) => Some("low"),
+        Some(ReasoningLevel::Medium) => Some("medium"),
+        Some(ReasoningLevel::High) => Some("high"),
+        _ => None,
+    }
 }
 
 /// Map a Comet sandbox level into the child's `GROK_SANDBOX` env value.
@@ -170,14 +165,21 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn effort_maps_and_clamps() {
+    fn effort_maps_one_to_one() {
         assert_eq!(to_effort(None), None);
         assert_eq!(to_effort(Some(ReasoningLevel::Low)), Some("low"));
         assert_eq!(to_effort(Some(ReasoningLevel::Medium)), Some("medium"));
         assert_eq!(to_effort(Some(ReasoningLevel::High)), Some("high"));
-        assert_eq!(to_effort(Some(ReasoningLevel::Minimal)), Some("low"));
-        assert_eq!(to_effort(Some(ReasoningLevel::XHigh)), Some("high"));
-        assert_eq!(to_effort(Some(ReasoningLevel::Ultra)), Some("high"));
+        for unsupported in [
+            ReasoningLevel::Minimal,
+            ReasoningLevel::XHigh,
+            ReasoningLevel::Max,
+            ReasoningLevel::Ultra,
+            ReasoningLevel::Ultracode,
+            ReasoningLevel::Ultrathink,
+        ] {
+            assert_eq!(to_effort(Some(unsupported)), None);
+        }
     }
 
     #[test]
