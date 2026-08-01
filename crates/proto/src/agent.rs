@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub enum HarnessId {
     ClaudeCode,
     Codex,
+    /// Grok Build CLI (`grok agent … stdio`, ACP v1).
+    GrokBuild,
     Cursor,
     /// Test harness; never shown in production pickers.
     Mock,
@@ -303,6 +305,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&HarnessId::ClaudeCode).unwrap(),
             "\"claude-code\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HarnessId::GrokBuild).unwrap(),
+            "\"grok-build\""
         );
     }
 }

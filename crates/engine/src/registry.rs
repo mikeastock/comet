@@ -1,6 +1,6 @@
 //! HarnessRegistry — the engine's harness catalog: eager instances (mock) plus lazy
-//! slots resolved on first use (claude-code spawns subprocess discovery; codex/cursor
-//! later). Lazy slots carry a static descriptor so `ListHarnesses` never forces a spawn.
+//! slots resolved on first use (claude-code / codex / grok-build; cursor later).
+//! Lazy slots carry a static descriptor so `ListHarnesses` never forces a spawn.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -210,6 +210,22 @@ pub fn default_registry() -> HarnessRegistry {
         },
         Box::new(|| Ok(Arc::new(comet_harness::CodexHarness::new()) as Arc<dyn Harness>)),
     );
+    // Grok Build: ACP v1 over `grok agent … stdio`. Static descriptor must
+    // mirror GrokBuildHarness exactly (StepBoundary, Low/Medium/High).
+    registry.register_lazy(
+        HarnessDescriptor {
+            id: HarnessId::GrokBuild,
+            name: "Grok Build".into(),
+            supports_steering: true,
+            steering_mode: SteeringMode::StepBoundary,
+            reasoning_levels: vec![
+                ReasoningLevel::Low,
+                ReasoningLevel::Medium,
+                ReasoningLevel::High,
+            ],
+        },
+        Box::new(|| Ok(Arc::new(comet_harness::GrokBuildHarness::new()) as Arc<dyn Harness>)),
+    );
     registry
 }
 
@@ -249,12 +265,17 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_lists_mock_claude_and_codex_slots() {
+    fn default_registry_lists_mock_claude_codex_and_grok_slots() {
         let registry = default_registry();
         let ids: Vec<HarnessId> = registry.descriptors().iter().map(|d| d.id).collect();
         assert_eq!(
             ids,
-            vec![HarnessId::Mock, HarnessId::ClaudeCode, HarnessId::Codex]
+            vec![
+                HarnessId::Mock,
+                HarnessId::ClaudeCode,
+                HarnessId::Codex,
+                HarnessId::GrokBuild,
+            ]
         );
         assert!(registry.resolve(HarnessId::Mock).is_ok());
         assert!(registry.resolve(HarnessId::ClaudeCode).is_ok());
@@ -262,6 +283,10 @@ mod tests {
         // cheap; CLI discovery is deferred to models()/run()).
         let codex = registry.resolve(HarnessId::Codex).unwrap();
         assert_eq!(codex.id(), HarnessId::Codex);
+        let grok = registry.resolve(HarnessId::GrokBuild).unwrap();
+        assert_eq!(grok.id(), HarnessId::GrokBuild);
+        assert_eq!(grok.display_name(), "Grok Build");
+        assert_eq!(grok.steering_mode(), SteeringMode::StepBoundary);
     }
 
     /// The Codex lazy descriptor must be indistinguishable from `describe()`
@@ -288,5 +313,27 @@ mod tests {
         assert_eq!(before.supports_steering, after.supports_steering);
         assert_eq!(before.steering_mode, after.steering_mode);
         assert_eq!(before.reasoning_levels, after.reasoning_levels);
+    }
+
+    #[test]
+    fn grok_lazy_descriptor_matches_resolved_harness() {
+        let registry = default_registry();
+        let before = registry
+            .descriptors()
+            .into_iter()
+            .find(|d| d.id == HarnessId::GrokBuild)
+            .unwrap();
+        registry.resolve(HarnessId::GrokBuild).unwrap();
+        let after = registry
+            .descriptors()
+            .into_iter()
+            .find(|d| d.id == HarnessId::GrokBuild)
+            .unwrap();
+        assert_eq!(before.name, after.name);
+        assert_eq!(before.supports_steering, after.supports_steering);
+        assert_eq!(before.steering_mode, after.steering_mode);
+        assert_eq!(before.reasoning_levels, after.reasoning_levels);
+        assert_eq!(before.name, "Grok Build");
+        assert_eq!(before.steering_mode, SteeringMode::StepBoundary);
     }
 }

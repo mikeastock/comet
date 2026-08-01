@@ -1,4 +1,4 @@
-# Rust harness integration: Claude Code + Codex (2026-07)
+# Rust harness integration: Claude Code + Codex + Grok Build (2026-07 / 2026-08)
 
 ## Decision
 - Claude Code: spawn installed `claude` CLI, speak stream-json directly. NO crates.io SDK dep
@@ -8,6 +8,11 @@
   bypasses the SDK). Only option with token deltas + turn/steer + turn/interrupt + thread/resume +
   model/list + approval requests. codex-rs crates are NOT published (git dep not recommended).
   `codex exec --json` = CI-only surface (no deltas/steer/approvals).
+- Grok Build: spawn installed `grok` CLI as
+  `grok agent --always-approve --no-leader [--model ID] [--reasoning-effort low|medium|high] stdio`
+  and speak ACP v1 (newline-delimited JSON-RPC) over stdio. Auth is Grok's own
+  (`~/.grok/auth.json` / env) — no Comet account-management UI. Shared transport lives in
+  `crates/harness/src/jsonrpc.rs` (also used by Codex).
 
 ## Claude CLI protocol
 - One-shot: `claude -p "<prompt>" --output-format stream-json --verbose --include-partial-messages [--bare]`
@@ -56,17 +61,46 @@
 - Child lifecycle hardening from codex.ts to port: SIGTERM->SIGKILL escalation, signal-death !=
   clean exit, EPIPE swallowing.
 
+## Grok Build ACP v1 protocol
+- Handshake: `initialize { protocolVersion: 1, clientCapabilities: {}, clientInfo }` → result
+  carries `agentCapabilities.loadSession`, prompt caps (image/audio false, text/embeddedContext
+  true), auth methods, and `_meta.modelState` (`currentModelId` + `availableModels` with
+  reasoningEfforts). Then `notifications/initialized`.
+- `session/new { cwd, mcpServers: [] }` → `sessionId`; resume via `session/load { sessionId, cwd,
+  mcpServers }` with fallback to `session/new` on failure (debug log).
+- `session/prompt { sessionId, prompt: [{type:"text", text}] }` — response after the turn with
+  `stopReason` + `_meta.usage` (inputTokens/outputTokens). Streaming arrives as
+  `session/update` notifications: `agent_message_chunk` / `agent_thought_chunk` content blocks,
+  `tool_call` / `tool_call_update` (tool name from `_meta["x.ai/tool"].name`, canonical input
+  preferred over `rawInput`; emit ToolCall once, ToolResult on completed/failed).
+- `session/cancel { sessionId }` is a **notification** (no response); host then SIGTERM→SIGKILL.
+- Steering: send `_x.ai/interject { sessionId, text, interjectionId }` while a prompt is active.
+  Grok queues it for the next safe point in the live turn. A steer received between prompts uses a
+  new `session/prompt` on the same session; the persistent engine parks the stream while idle.
+- Sandbox env: `ReadOnly→GROK_SANDBOX=read-only`, `WorkspaceWrite→workspace`,
+  `DangerFullAccess→off`. Reasoning: Low/Medium/High map 1:1 to CLI `--reasoning-effort`.
+- Executable: `GROK_EXECUTABLE`, then PATH, then `~/.grok/bin/grok`, `~/bin/grok`,
+  `~/.local/bin/grok`, Homebrew/usr-local, plus Node version-manager bins (same pattern as Codex).
+- `ask_user_question`: Grok sends `_x.ai/ask_user_question` as a blocking server→client request.
+  Comet maps its questions through `RunControls::request_input`, then responds with Grok's
+  `{ outcome: "accepted", answers, annotations? }` shape (or `cancelled`). ACP custom methods use
+  the leading `_` on the raw stdio wire; bare `x.ai/*` methods are rejected as method-not-found.
+- Image input: CLI advertises `image: false`; keep durable path refs in prompt text only.
+
 ## Shared shape
-Both reduce to: spawn child, frame JSONL stdout (+ id-multiplexing), write stdin lines, map to one
-AgentEvent enum, mpsc steering mailbox, cancellation token kills child.
+All three reduce to: spawn child, frame JSONL stdout (+ id-multiplexing for JSON-RPC peers),
+write stdin lines, map to one AgentEvent enum, mpsc steering mailbox, cancellation token kills
+child. Codex and Grok share `crates/harness/src/jsonrpc.rs`.
 
 ## Capability matrix to replicate (from packages/harness)
 Normalized AgentEvent stream; typed ToolCall decoding (Bash/Read/Write/Edit/Grep/Glob/WebFetch/
-WebSearch/TodoWrite -> Exec/ReadFile/...; codex item types); model discovery + effort ladders +
-options ([1m] context suffix, fastMode, thinking, service tiers); ultrathink = prompt prefix,
-ultracode = xhigh + setting; sandbox mapping; AskUserQuestion -> requestInput; resume; interrupt;
-steering (step-boundary via stdin / turn/steer with expectedTurnId + turn/start fallback);
-subagent frame filtering; error-code mapping.
+WebSearch/TodoWrite -> Exec/ReadFile/...; codex item types; Grok `_meta["x.ai/tool"]` names);
+model discovery + effort ladders + options ([1m] context suffix, fastMode, thinking, service
+tiers); ultrathink = prompt prefix, ultracode = xhigh + setting; sandbox mapping;
+AskUserQuestion -> requestInput (Claude/Codex/Grok); resume; interrupt; steering (step-boundary via
+stdin / turn/steer with expectedTurnId + turn/start fallback / `_x.ai/interject`); subagent frame
+filtering; error-code mapping.
 (Citations in agent transcript: code.claude.com/docs/en/headless, agent-sdk/typescript,
 claude-code#24594, claude-agent-sdk-python query.py/subprocess_cli.py, Codex app-server docs +
-README, openai.com "Unlocking the Codex harness", codex#5028.)
+README, openai.com "Unlocking the Codex harness", codex#5028; Grok Build ACP v1 live probe
+against CLI 0.2.114.)

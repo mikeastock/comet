@@ -23,6 +23,7 @@ enum HarnessCatalog {
     static let harnesses: [HarnessInfo] = [
         HarnessInfo(id: "claude-code", label: "Claude Code"),
         HarnessInfo(id: "codex", label: "Codex"),
+        HarnessInfo(id: "grok-build", label: "Grok Build"),
     ]
 
     private static let fullLadder = ["low", "medium", "high", "xhigh", "max", "ultracode", "ultrathink"]
@@ -30,6 +31,7 @@ enum HarnessCatalog {
     private static let codexUltraLadder = ["low", "medium", "high", "xhigh", "max", "ultra"]
     private static let codexMaxLadder = ["low", "medium", "high", "xhigh", "max"]
     private static let codexXhighLadder = ["low", "medium", "high", "xhigh"]
+    private static let grokLadder = ["low", "medium", "high"]
 
     static func models(for harness: String) -> [ModelInfo] {
         switch harness {
@@ -49,6 +51,11 @@ enum HarnessCatalog {
                           description: "Small, fast and capable", reasoningLevels: codexXhighLadder),
                 ModelInfo(id: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark",
                           description: "Ultra-fast lightweight coding", reasoningLevels: codexXhighLadder),
+            ]
+        case "grok-build":
+            return [
+                ModelInfo(id: "grok-4.5", label: "Grok 4.5",
+                          description: "xAI coding model", reasoningLevels: grokLadder),
             ]
         default:  // claude-code (mock shares it)
             return [

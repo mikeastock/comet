@@ -230,11 +230,38 @@ fn engine_config_from_env() -> comet_engine::EngineConfig {
 /// `COMET_HARNESS` (kebab-case id) picks the default harness for chats without a
 /// config row — `mock` powers the e2e smoke; default `claude-code`.
 fn harness_from_env() -> comet_engine::HarnessId {
-    match std::env::var("COMET_HARNESS").as_deref().map(str::trim) {
-        Ok("mock") => comet_engine::HarnessId::Mock,
-        Ok("codex") => comet_engine::HarnessId::Codex,
-        Ok("cursor") => comet_engine::HarnessId::Cursor,
+    parse_harness_env(std::env::var("COMET_HARNESS").ok().as_deref())
+}
+
+/// Pure helper for `COMET_HARNESS` aliases (unit-tested).
+fn parse_harness_env(raw: Option<&str>) -> comet_engine::HarnessId {
+    match raw.map(str::trim) {
+        Some("mock") => comet_engine::HarnessId::Mock,
+        Some("codex") => comet_engine::HarnessId::Codex,
+        Some("cursor") => comet_engine::HarnessId::Cursor,
+        Some("grok" | "grok-build" | "grok_build") => comet_engine::HarnessId::GrokBuild,
         _ => comet_engine::HarnessId::ClaudeCode,
+    }
+}
+
+#[cfg(test)]
+mod harness_env_tests {
+    use super::parse_harness_env;
+    use comet_engine::HarnessId;
+
+    #[test]
+    fn parses_grok_aliases() {
+        assert_eq!(parse_harness_env(Some("grok")), HarnessId::GrokBuild);
+        assert_eq!(parse_harness_env(Some("grok-build")), HarnessId::GrokBuild);
+        assert_eq!(parse_harness_env(Some("grok_build")), HarnessId::GrokBuild);
+        assert_eq!(
+            parse_harness_env(Some("  grok-build  ")),
+            HarnessId::GrokBuild
+        );
+        assert_eq!(parse_harness_env(Some("codex")), HarnessId::Codex);
+        assert_eq!(parse_harness_env(Some("mock")), HarnessId::Mock);
+        assert_eq!(parse_harness_env(None), HarnessId::ClaudeCode);
+        assert_eq!(parse_harness_env(Some("nope")), HarnessId::ClaudeCode);
     }
 }
 

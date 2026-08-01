@@ -8,9 +8,10 @@
 //! - The terminal tab glyphs (`terminal`, `plus`, `close`) and the stop square
 //!   are ports of the hand-drawn inline SVGs in comet's `terminal-panel.tsx` /
 //!   `composer-actions.tsx`.
-//! - The harness brand marks (`claude-mark`, `openai-mark`, `cursor-mark`) are
-//!   ports of comet's `icons.tsx`. gpui tints SVGs with the text color, so the
-//!   Claude mark's brand orange is applied at the call site ([`CLAUDE_BRAND`]).
+//! - The harness brand marks (`claude-mark`, `openai-mark`, `cursor-mark`,
+//!   `grok-mark`) are ports of comet's `icons.tsx` (Grok: xAI mark, mono).
+//!   gpui tints SVGs with the text color, so the Claude mark's brand orange is
+//!   applied at the call site ([`CLAUDE_BRAND`]).
 //!
 //! Icons render via [`icon`]: `icon(icons::PAPERCLIP).size(px(16.)).text_color(…)`.
 
@@ -112,10 +113,11 @@ icon_assets![
     (CHECK, "check"),
     (COPY, "copy"),
     (COMET_LOGO, "comet-logo"),
-    // Harness brand marks (icons.tsx).
+    // Harness brand marks (icons.tsx + xAI/Grok).
     (CLAUDE_MARK, "claude-mark"),
     (OPENAI_MARK, "openai-mark"),
     (CURSOR_MARK, "cursor-mark"),
+    (GROK_MARK, "grok-mark"),
 ];
 
 /// The Claude mark's brand orange (`#D97757`) — comet keeps it even on the
