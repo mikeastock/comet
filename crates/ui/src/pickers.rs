@@ -2329,6 +2329,8 @@ pub(crate) fn harness_brand_icon(harness: HarnessId) -> (&'static str, Option<gp
             Some(crate::icons::claude_brand()),
         ),
         HarnessId::Codex => (crate::icons::OPENAI_MARK, None),
+        // Initial integration: reuse GLOBAL until a Grok brand asset lands.
+        HarnessId::GrokBuild => (crate::icons::GLOBAL, None),
         HarnessId::Cursor => (crate::icons::CURSOR_MARK, None),
     }
 }
@@ -2781,5 +2783,12 @@ mod tests {
         // …and opted back in by COMET_HARNESS=mock (the e2e rig).
         assert_eq!(visible_harnesses_impl(&mixed, true).len(), 2);
         assert_eq!(visible_harnesses_impl(&mixed, true)[0].id, HarnessId::Mock);
+    }
+
+    #[test]
+    fn grok_build_uses_global_icon() {
+        let (icon, tint) = harness_brand_icon(HarnessId::GrokBuild);
+        assert_eq!(icon, crate::icons::GLOBAL);
+        assert!(tint.is_none());
     }
 }

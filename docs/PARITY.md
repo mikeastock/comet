@@ -56,6 +56,7 @@ not built yet).
 | --- | --- | --- |
 | Claude Code adapter | done | stream-json, model discovery/effort ladders, AskUserQuestion → requestInput, steering via persistent input, init dedup, subagent filtering. **Live-verified against the real `claude` CLI 2.1.215**: doc-queued run → host executor → subprocess → streamed reply landed complete in the doc. |
 | Codex adapter | done | `codex app-server` JSON-RPC (thread/start/resume, sandbox policy). |
+| Grok Build adapter | done | ACP v1 over `grok agent --always-approve --no-leader … stdio`; live model discovery from initialize `_meta.modelState`; turn-boundary steering (no mid-turn steer); auth reused from Grok (`~/.grok/auth.json`); sandbox via `GROK_SANDBOX`. **Live-verified against Grok CLI 0.2.114**: discovered `grok-4.5`, streamed reasoning + text, emitted usage, and completed a real session. **Limitation:** Grok 0.2.114 has no verified ACP host bridge for `ask_user_question` — session rule + child timeouts bound accidental hangs; no Comet account UI for Grok in this pass. |
 | Cursor adapter | deferred | Parity item scheduled after Codex; no CLI surface settled. |
 | Mock harness | done | Scripted event replay; powers tests + the e2e smoke. |
 
@@ -103,6 +104,6 @@ not built yet).
 
 ## Summary
 
-Table rows above: **39 done · 6 partial · 1 deferred** (Cursor harness), plus
+Table rows above: **40 done · 6 partial · 1 deferred** (Cursor harness), plus
 the cross-cutting deferrals (mobile, E2EE, macOS packaging execution,
 engine hardening) — the last overlaps the named gaps in the partial rows.

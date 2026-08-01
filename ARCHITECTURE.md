@@ -1,7 +1,8 @@
 # comet-native — Architecture
 
 A ground-up native rewrite of [comet](../comet) — a multi-device controller for coding agents
-(Claude Code / Codex) — in Rust, with a gpui UI. Fresh app; no backwards compatibility required.
+(Claude Code / Codex / Grok Build) — in Rust, with a gpui UI. Fresh app; no backwards
+compatibility required.
 
 **Pillars (from the goal):**
 - Sync is Loro CRDT docs (loro-mirror model) through Cloudflare Durable Objects.
@@ -138,7 +139,8 @@ comet-native/
                                  # ephemeral presence, DocsStore (SQLite snapshots +
                                  # processed-command ledger)
     harness/      comet-harness  # Harness trait + claude-code (stream-json subprocess),
-                                 # codex (app-server JSON-RPC), mock; steering mailbox,
+                                 # codex (app-server JSON-RPC), grok-build (ACP v1 stdio),
+                                 # mock; shared jsonrpc transport; steering mailbox,
                                  # requestInput, models/reasoning/options catalogs
     engine/       comet-engine   # sessions engine (pub/sub, run journal, recovery, stall
                                  # watchdog), doc host + command executor, repos/worktrees,
@@ -222,10 +224,12 @@ Direct ports of comet behaviors (spec: feature-inventory §3):
   segments at 120ms commits, drain commands host-only with processed-ledger idempotence, publish
   diff sidecar, presence); warm-open recent chats (14d/cap 30); nudge-driven cold open; SQLite
   snapshot store.
-- **Harness** (research pending — `docs/research/harness.md`): trait mirroring comet's
-  `HarnessShape`; Claude Code via `claude` CLI stream-json in/out (control protocol for
-  permissions/AskUserQuestion→requestInput, resume, steering); Codex via app-server JSON-RPC or
-  `codex exec --json`; model/reasoning/option catalogs ported from `packages/harness`.
+- **Harness** (`docs/research/harness.md`): trait mirroring comet's `HarnessShape`; Claude Code
+  via `claude` CLI stream-json in/out (control protocol for permissions/AskUserQuestion→
+  requestInput, resume, steering); Codex via app-server JSON-RPC; Grok Build via
+  `grok agent … stdio` ACP v1 (session/new|load/prompt/cancel, turn-boundary steering, live
+  model discovery from initialize `_meta.modelState`; auth reused from `~/.grok/auth.json`);
+  shared newline JSON-RPC client in `harness/src/jsonrpc.rs`.
 - **Repos/diffs**: git2 or `git` subprocess (subprocess — matches comet, avoids libgit2 edge
   cases); worktrees under `~/.comet-native/worktrees`; fs watchers (`notify`) + 2min repair; diff
   capture (patch + numstat + untracked, 3MiB cap, sha256) → workspace doc summary + DO diff
@@ -276,8 +280,8 @@ Status legend: ✅ shipped · 🟡 shipped with named gaps (see `docs/PARITY.md`
   two headless engines against a real edge — B queues a run into the chat doc, the durable
   nudge wakes host A, A executes (mock harness), transcript + session status sync back to B.
 - 🟡 **M5 Full surface** — terminals, diff pane, repo/branch/folder pickers + worktrees,
-  agent accounts UI, settings (devices/shortcuts/archived), Codex harness. Gaps: composer
-  attachment UI (engine upload RPCs exist), Cursor harness.
+  agent accounts UI, settings (devices/shortcuts/archived), Codex harness, Grok Build harness.
+  Gaps: composer attachment UI (engine upload RPCs exist), Cursor harness, Grok account cards.
 - 🟡 **M6 Polish** — wire reconciliation (proto AuthState on the wire, `LocalDevice`),
   two-device e2e smoke, keyboard map, clippy/fmt sweep, Linux packaging
   (`scripts/package-linux.sh` + release profile), macOS bundling config (`dist/macos/`,

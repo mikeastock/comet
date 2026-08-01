@@ -1,4 +1,5 @@
-//! comet-harness — one interface over Claude Code / Codex (and a mock for tests).
+//! comet-harness — one interface over Claude Code / Codex / Grok Build (and a
+//! mock for tests).
 //!
 //! Integration decisions (docs/research/harness.md):
 //! - Claude Code: spawn the installed `claude` CLI with
@@ -7,6 +8,9 @@
 //!   requestInput, interrupt, set_model), steer by writing user lines mid-run.
 //! - Codex: spawn `codex app-server`, JSON-RPC 2.0 over stdio (thread/start, turn/start,
 //!   turn/steer{expectedTurnId}, turn/interrupt, item/* + delta notifications).
+//! - Grok Build: spawn `grok agent --always-approve --no-leader … stdio`, ACP v1
+//!   JSON-RPC over stdio (session/new|load, session/prompt, session/cancel,
+//!   session/update); turn-boundary steering only.
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -66,6 +70,8 @@ pub trait Harness: Send + Sync {
 
 pub mod claude;
 pub mod codex;
+pub mod grok;
+pub(crate) mod jsonrpc;
 pub mod mock;
 
 /// Bin directories where npm-installed CLIs land under Node version managers.
@@ -196,3 +202,4 @@ pub(crate) fn crash_message(
 
 pub use claude::ClaudeHarness;
 pub use codex::CodexHarness;
+pub use grok::GrokBuildHarness;
