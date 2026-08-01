@@ -2,8 +2,8 @@ import AuthenticationServices
 import UIKit
 
 enum Endpoints {
-    static let edgeURL = URL(string: "https://edge.zeron.sh")!
-    static let workosClientId = "client_01KWD0EAKZKD50YCQJNYSRE4BY"
+    static let edgeURL = URL(string: "https://comet-native-edge.buildr-internal-tools.workers.dev")!
+    static let workosClientId = "client_01KYXECAJHZ0A07VVNDKMWV3X5"
     static let callbackScheme = "zeron"
 
     static func authorizeURL(state: String) -> URL {
