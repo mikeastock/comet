@@ -74,17 +74,17 @@
   `tool_call` / `tool_call_update` (tool name from `_meta["x.ai/tool"].name`, canonical input
   preferred over `rawInput`; emit ToolCall once, ToolResult on completed/failed).
 - `session/cancel { sessionId }` is a **notification** (no response); host then SIGTERM→SIGKILL.
-- Steering: **TurnBoundary only** — no verified mid-turn steer. Buffer while a prompt is active;
-  after `Done::Completed`, emit `Steered` and send another `session/prompt` on the same session.
-  Persistent engine parks the stream waiting for the next steer.
+- Steering: send `_x.ai/interject { sessionId, text, interjectionId }` while a prompt is active.
+  Grok queues it for the next safe point in the live turn. A steer received between prompts uses a
+  new `session/prompt` on the same session; the persistent engine parks the stream while idle.
 - Sandbox env: `ReadOnly→GROK_SANDBOX=read-only`, `WorkspaceWrite→workspace`,
   `DangerFullAccess→off`. Reasoning: Low/Medium/High map 1:1 to CLI `--reasoning-effort`.
 - Executable: `GROK_EXECUTABLE`, then PATH, then `~/.grok/bin/grok`, `~/bin/grok`,
   `~/.local/bin/grok`, Homebrew/usr-local, plus Node version-manager bins (same pattern as Codex).
-- **ask_user_question limitation (Grok 0.2.114):** no verified ACP host request bridge; the CLI
-  waits internally. Comet injects a session rule asking Grok not to use that tool, and sets
-  `GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED=true` + `GROK_ASK_USER_QUESTION_TIMEOUT_SECS=30` on the
-  child so an accidental call cannot hang forever. Do not fabricate request-input support.
+- `ask_user_question`: Grok sends `_x.ai/ask_user_question` as a blocking server→client request.
+  Comet maps its questions through `RunControls::request_input`, then responds with Grok's
+  `{ outcome: "accepted", answers, annotations? }` shape (or `cancelled`). ACP custom methods use
+  the leading `_` on the raw stdio wire; bare `x.ai/*` methods are rejected as method-not-found.
 - Image input: CLI advertises `image: false`; keep durable path refs in prompt text only.
 
 ## Shared shape
@@ -97,9 +97,9 @@ Normalized AgentEvent stream; typed ToolCall decoding (Bash/Read/Write/Edit/Grep
 WebSearch/TodoWrite -> Exec/ReadFile/...; codex item types; Grok `_meta["x.ai/tool"]` names);
 model discovery + effort ladders + options ([1m] context suffix, fastMode, thinking, service
 tiers); ultrathink = prompt prefix, ultracode = xhigh + setting; sandbox mapping;
-AskUserQuestion -> requestInput (Claude/Codex; Grok: see limitation above); resume; interrupt;
-steering (step-boundary via stdin / turn/steer with expectedTurnId + turn/start fallback;
-Grok turn-boundary only); subagent frame filtering; error-code mapping.
+AskUserQuestion -> requestInput (Claude/Codex/Grok); resume; interrupt; steering (step-boundary via
+stdin / turn/steer with expectedTurnId + turn/start fallback / `_x.ai/interject`); subagent frame
+filtering; error-code mapping.
 (Citations in agent transcript: code.claude.com/docs/en/headless, agent-sdk/typescript,
 claude-code#24594, claude-agent-sdk-python query.py/subprocess_cli.py, Codex app-server docs +
 README, openai.com "Unlocking the Codex harness", codex#5028; Grok Build ACP v1 live probe

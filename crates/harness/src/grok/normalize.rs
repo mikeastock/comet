@@ -9,15 +9,6 @@
 use comet_proto::{AgentEvent, TodoItem, ToolCall};
 use serde_json::Value;
 
-/// Instruction injected on the first prompt of a new session: Grok 0.2.114
-/// has no verified ACP host bridge for `ask_user_question`, so we ask it not
-/// to use that tool. Pair with the child env timeouts so an accidental call
-/// cannot hang forever.
-pub(crate) const ASK_USER_QUESTION_SESSION_RULE: &str = "\
-[Comet session rule] Do not use the ask_user_question tool. Comet cannot \
-answer interactive questions mid-turn. Proceed with your best judgment \
-instead of blocking on user input.";
-
 /// Extract text from an ACP content block (`{"type":"text","text":...}`) or a
 /// bare string.
 pub(crate) fn content_text(content: &Value) -> Option<String> {

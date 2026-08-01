@@ -19,9 +19,6 @@ case "$*" in
     ;;
   *) exit 1 ;;
 esac
-[ "$GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED" = "true" ] || exit 1
-[ "$GROK_ASK_USER_QUESTION_TIMEOUT_SECS" = "30" ] || exit 1
-
 # ---- handshake -------------------------------------------------------------
 read -r line || exit 1 # initialize
 has "$line" '"method":"initialize"' || exit 1
@@ -68,11 +65,6 @@ while read -r promptline; do
   case "$promptline" in
 
   *scenario:happy*)
-    # First prompt should carry the session rule + user text as content blocks.
-    has "$promptline" 'ask_user_question' || {
-      emit "{\"id\":$pid,\"error\":{\"code\":-32600,\"message\":\"missing ask_user_question session rule\"}}"
-      continue
-    }
     has "$promptline" 'scenario:happy' || {
       emit "{\"id\":$pid,\"error\":{\"code\":-32600,\"message\":\"missing user prompt\"}}"
       continue
@@ -93,20 +85,26 @@ while read -r promptline; do
 
   *scenario:steer*)
     emit '{"method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"first"}}}}'
-    emit "{\"id\":$pid,\"result\":{\"stopReason\":\"end_turn\",\"_meta\":{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}}}"
-    # Wait for follow-up steer prompt
+    # Keep the prompt active while Comet sends the ACP interjection extension.
     read -r steerline || exit 1
     sid=$(rid "$steerline")
-    if has "$steerline" '"method":"session/prompt"' && has "$steerline" 'redirect please'; then
-      # Steered follow-ups must NOT re-include the session rule.
-      if has "$steerline" 'ask_user_question'; then
-        emit "{\"id\":$sid,\"error\":{\"code\":-32600,\"message\":\"session rule should not repeat on steer\"}}"
-        continue
-      fi
+    if has "$steerline" '"method":"_x.ai/interject"' && has "$steerline" 'redirect please' && has "$steerline" '"sessionId":"sess-1"'; then
+      emit "{\"id\":$sid,\"result\":{\"result\":{\"status\":\"queued\"}}}"
       emit '{"method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"steered"}}}}'
-      emit "{\"id\":$sid,\"result\":{\"stopReason\":\"end_turn\",\"_meta\":{\"usage\":{\"inputTokens\":2,\"outputTokens\":2}}}}"
+      emit "{\"id\":$pid,\"result\":{\"stopReason\":\"end_turn\",\"_meta\":{\"usage\":{\"inputTokens\":2,\"outputTokens\":2}}}}"
     else
-      emit "{\"id\":$sid,\"error\":{\"code\":-32600,\"message\":\"expected steered session/prompt\"}}"
+      emit "{\"id\":$sid,\"error\":{\"code\":-32600,\"message\":\"expected _x.ai/interject\"}}"
+    fi
+    ;;
+
+  *scenario:question*)
+    emit '{"jsonrpc":"2.0","id":900,"method":"_x.ai/ask_user_question","params":{"sessionId":"sess-1","toolCallId":"call-question","questions":[{"question":"Choose one?","options":[{"label":"a","description":"first"},{"label":"b","description":"second"}],"multiSelect":false}],"mode":"default"}}'
+    read -r answerline || exit 1
+    if has "$answerline" '"id":900' && has "$answerline" '"outcome":"accepted"' && has "$answerline" '"Choose one?":["b"]'; then
+      emit '{"method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"answered"}}}}'
+      emit "{\"id\":$pid,\"result\":{\"stopReason\":\"end_turn\",\"_meta\":{\"usage\":{\"inputTokens\":2,\"outputTokens\":1}}}}"
+    else
+      emit "{\"id\":$pid,\"error\":{\"code\":-32600,\"message\":\"invalid question response\"}}"
     fi
     ;;
 

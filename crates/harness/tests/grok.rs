@@ -2,6 +2,7 @@
 //! `tests/fixtures/fake-grok.sh` (no real `grok` binary involved).
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -162,7 +163,7 @@ async fn happy_path_maps_deltas_tools_usage_and_done() {
 }
 
 #[tokio::test]
-async fn turn_boundary_steer_starts_follow_up_prompt() {
+async fn step_boundary_steer_interjects_into_active_prompt() {
     let (controls, steer_tx, _token) = controls();
     let harness = harness();
     let stream = harness
@@ -171,19 +172,14 @@ async fn turn_boundary_steer_starts_follow_up_prompt() {
         .expect("run starts");
     let mut stream = std::pin::pin!(stream);
 
-    // Wait until first Done::Completed, then steer.
-    let mut saw_first_done = false;
+    // The fixture keeps the prompt open after this first chunk until it receives
+    // `_x.ai/interject`.
+    let mut saw_first_chunk = false;
     let mut events = Vec::new();
     while let Some(ev) = stream.next().await {
         let ev = ev.expect("event");
-        if matches!(
-            &ev,
-            AgentEvent::Done {
-                status: DoneStatus::Completed,
-                ..
-            }
-        ) {
-            saw_first_done = true;
+        if matches!(&ev, AgentEvent::TextDelta { text } if text == "first") {
+            saw_first_chunk = true;
             events.push(ev);
             let _ = steer_tx
                 .send(SteerMessage {
@@ -191,20 +187,20 @@ async fn turn_boundary_steer_starts_follow_up_prompt() {
                     message_id: None,
                 })
                 .await;
-            // Close mailbox after steer so the session ends after the follow-up.
+            // Close mailbox after steer so the session ends with this turn.
             drop(steer_tx);
             break;
         }
         events.push(ev);
     }
-    assert!(saw_first_done, "first turn must complete: {events:?}");
+    assert!(saw_first_chunk, "first chunk must arrive: {events:?}");
 
     let rest: Vec<_> = tokio::time::timeout(
         Duration::from_secs(10),
         stream.map(|r| r.expect("stream event")).collect::<Vec<_>>(),
     )
     .await
-    .expect("steered turn finished");
+    .expect("interjected turn finished");
     events.extend(rest);
 
     assert!(
@@ -230,9 +226,47 @@ async fn turn_boundary_steer_starts_follow_up_prompt() {
                 }
             ))
             .count(),
-        2,
-        "two completed turns: {events:?}"
+        1,
+        "interjection must remain within one turn: {events:?}"
     );
+}
+
+#[tokio::test]
+async fn ask_user_question_round_trips_through_input_bridge() {
+    let seen_questions = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&seen_questions);
+    let (steer_tx, steer_rx) = mpsc::channel(8);
+    let controls = RunControls {
+        request_input: Box::new(move |questions| {
+            *seen.lock().expect("question capture lock") = questions.clone();
+            let (tx, rx) = oneshot::channel();
+            let _ = tx.send(vec![UserInputAnswer {
+                question_id: questions[0].id.clone(),
+                labels: vec!["b".into()],
+            }]);
+            rx
+        }),
+        steering: steer_rx,
+        interrupt: CancellationToken::new(),
+    };
+
+    let events = run_to_end(&harness(), request("scenario:question"), controls, steer_tx).await;
+    let questions = seen_questions.lock().expect("question capture lock");
+    assert_eq!(questions.len(), 1);
+    assert_eq!(questions[0].header, "Question");
+    assert_eq!(questions[0].question, "Choose one?");
+    assert_eq!(questions[0].options, ["a", "b"]);
+    assert!(!questions[0].multi_select);
+    assert!(events.contains(&AgentEvent::TextDelta {
+        text: "answered".into()
+    }));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::Done {
+            status: DoneStatus::Completed,
+            ..
+        }
+    )));
 }
 
 #[tokio::test]
@@ -340,6 +374,6 @@ async fn missing_binary_is_not_installed() {
     assert_eq!(missing.display_name(), "Grok Build");
     assert_eq!(
         missing.steering_mode(),
-        comet_proto::SteeringMode::TurnBoundary
+        comet_proto::SteeringMode::StepBoundary
     );
 }

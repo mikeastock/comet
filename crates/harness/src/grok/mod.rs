@@ -9,16 +9,14 @@
 //!   ACP content blocks. Grok owns and executes its tools.
 //! - `session/update` notifications map to text/thought deltas and typed
 //!   tool calls; prompt-result `_meta.usage` becomes Usage before Done.
-//! - Steering is turn-boundary only (no verified mid-turn steer): while a
-//!   prompt is active the mailbox buffers; after `Done::Completed` the next
-//!   steer emits `Steered` and starts another `session/prompt` on the same
-//!   session. The stream stays alive while the steering mailbox lives.
+//! - Steering uses Grok's `_x.ai/interject` ACP extension while a prompt is
+//!   active. A steer that arrives between prompts starts another
+//!   `session/prompt` on the same session.
 //! - Interrupt: `session/cancel` notification, then SIGTERM → SIGKILL; stream
 //!   ends with `Done { status: Interrupted }`.
 //! - Auth is Grok's own (`~/.grok/auth.json` / env). No Comet account UI.
-//! - `ask_user_question` has no verified ACP host bridge in Grok 0.2.114: a
-//!   session rule asks Grok not to use it, and child env timeouts bound any
-//!   accidental hang.
+//! - Grok's `_x.ai/ask_user_question` reverse request is bridged through
+//!   [`RunControls::request_input`] and answered on the ACP connection.
 
 mod catalog;
 mod normalize;
@@ -38,15 +36,13 @@ use tokio::sync::mpsc;
 
 use comet_proto::{
     AgentEvent, DoneStatus, HarnessId, Model, ReasoningLevel, RunRequest, SteeringMode,
+    UserInputAnswer, UserInputQuestion,
 };
 
 use crate::jsonrpc::{Incoming, RpcClient};
 use crate::{Harness, HarnessError, RunControls};
 use catalog::{REASONING_LEVELS, models_from_model_state, sandbox_env, to_effort};
-use normalize::{
-    ASK_USER_QUESTION_SESSION_RULE, map_session_update, stop_reason_error, update_payload,
-    usage_from_prompt_result,
-};
+use normalize::{map_session_update, stop_reason_error, update_payload, usage_from_prompt_result};
 
 /// Locate the device's installed Grok CLI: `GROK_EXECUTABLE`, then PATH, then
 /// common install locations GUI launches miss. Resolved per call — cheap, and
@@ -162,9 +158,6 @@ impl GrokBuildHarness {
         if !for_discovery {
             cmd.env("GROK_SANDBOX", sandbox_env(request.sandbox));
         }
-        // Bound accidental ask_user_question hangs (no verified host bridge).
-        cmd.env("GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED", "true");
-        cmd.env("GROK_ASK_USER_QUESTION_TIMEOUT_SECS", "30");
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -184,9 +177,9 @@ impl Harness for GrokBuildHarness {
     fn supports_steering(&self) -> bool {
         true
     }
-    /// Grok ACP v1 has no verified mid-turn steer; steers land between prompts.
+    /// Grok's interjection extension injects at the next safe point in a live turn.
     fn steering_mode(&self) -> SteeringMode {
-        SteeringMode::TurnBoundary
+        SteeringMode::StepBoundary
     }
     fn reasoning_levels(&self) -> &[ReasoningLevel] {
         REASONING_LEVELS
@@ -373,19 +366,16 @@ async fn send(tx: &mpsc::Sender<Result<AgentEvent, HarnessError>>, ev: AgentEven
     tx.send(Ok(ev)).await.is_ok()
 }
 
-/// ACP content blocks for a user prompt. The first prompt of a new session
-/// carries the ask_user_question session rule as a leading text block.
-fn prompt_content(text: &str, include_session_rule: bool) -> Value {
-    let mut blocks = Vec::new();
-    if include_session_rule {
-        blocks.push(json!({
-            "type": "text",
-            "text": ASK_USER_QUESTION_SESSION_RULE,
-        }));
-    }
-    blocks.push(json!({ "type": "text", "text": text }));
-    Value::Array(blocks)
+/// ACP content blocks for a user prompt.
+fn prompt_content(text: &str) -> Value {
+    json!([{ "type": "text", "text": text }])
 }
+
+type RequestInputFn = Box<
+    dyn Fn(Vec<UserInputQuestion>) -> tokio::sync::oneshot::Receiver<Vec<UserInputAnswer>>
+        + Send
+        + Sync,
+>;
 
 async fn run_session(session: Session) {
     let Session {
@@ -400,10 +390,11 @@ async fn run_session(session: Session) {
         stderr_tail,
     } = session;
     let RunControls {
-        request_input: _,
+        request_input,
         mut steering,
         interrupt,
     } = controls;
+    let request_input = std::sync::Arc::new(request_input);
 
     // ---- handshake + session (interruptible) ------------------------------
     let setup = async {
@@ -542,9 +533,6 @@ async fn run_session(session: Session) {
     let mut prompt_active = true;
     let mut done_current = false;
     let mut done_after_interrupt = false;
-    // Include the safety rule once per Comet run, including resumed sessions:
-    // an older or externally-created Grok session may not have seen it.
-    let include_session_rule = true;
     let mut escalation: Option<tokio::task::JoinHandle<()>> = None;
     // In-flight prompt request: spawned so the select loop keeps draining
     // session/update notifications while the RPC awaits its response.
@@ -552,7 +540,7 @@ async fn run_session(session: Session) {
         let client = client.clone();
         let params = json!({
             "sessionId": session_id,
-            "prompt": prompt_content(&request.prompt, include_session_rule),
+            "prompt": prompt_content(&request.prompt),
         });
         Some(tokio::spawn(async move {
             client.request("session/prompt", params).await
@@ -578,18 +566,25 @@ async fn run_session(session: Session) {
                     // Other notifications (_x.ai/*, etc.) are tolerated.
                 }
 
-                Some(Incoming::Request { id, method, .. }) => {
-                    // Grok owns its tools; no verified host request bridge.
-                    // Reject unknown server→client requests so nothing wedges.
-                    tracing::debug!(
-                        target: "comet_harness::grok",
-                        "unhandled server request: {method}"
-                    );
-                    client.respond_error(
-                        &id,
-                        -32601,
-                        &format!("unsupported method: {method}"),
-                    );
+                Some(Incoming::Request { id, method, params }) => {
+                    if method == "_x.ai/ask_user_question" {
+                        handle_user_question(
+                            id,
+                            params,
+                            &request_input,
+                            &client,
+                        );
+                    } else {
+                        tracing::debug!(
+                            target: "comet_harness::grok",
+                            "unhandled server request: {method}"
+                        );
+                        client.respond_error(
+                            &id,
+                            -32601,
+                            &format!("unsupported method: {method}"),
+                        );
+                    }
                 }
 
                 Some(Incoming::Eof) | None => break 'main,
@@ -716,8 +711,37 @@ async fn run_session(session: Session) {
                 Some(msg) => {
                     let text = msg.prompt;
                     if prompt_active {
-                        // Buffer until the active prompt completes.
-                        queued_steers.push_back(text);
+                        let params = json!({
+                            "sessionId": session_id,
+                            "text": text,
+                            "interjectionId": uuid::Uuid::new_v4().to_string(),
+                        });
+                        match client.request("_x.ai/interject", params).await {
+                            Ok(_) => {
+                                let (prev, next) = rotate(&mut assistant_message_id);
+                                if !send(
+                                    &event_tx,
+                                    AgentEvent::Steered {
+                                        assistant_message_id: Some(prev),
+                                        next_assistant_message_id: Some(next),
+                                    },
+                                )
+                                .await
+                                {
+                                    break 'main;
+                                }
+                            }
+                            Err(e) => {
+                                // Preserve the user's message if an older Grok
+                                // binary rejects the extension or the active turn
+                                // wins the completion race.
+                                tracing::debug!(
+                                    target: "comet_harness::grok",
+                                    "interject rejected (queued as next turn): {e}"
+                                );
+                                queued_steers.push_back(text);
+                            }
+                        }
                     } else if !start_steered_prompt(
                         &client,
                         &session_id,
@@ -835,13 +859,119 @@ async fn start_steered_prompt(
     let client = client.clone();
     let params = json!({
         "sessionId": session_id,
-        "prompt": prompt_content(text, false),
+        "prompt": prompt_content(text),
     });
     *pending_prompt = Some(tokio::spawn(async move {
         client.request("session/prompt", params).await
     }));
     *prompt_active = true;
     true
+}
+
+/// Serve Grok's blocking question extension without stalling the ACP receive
+/// loop. The engine owns the visible InputRequested/InputResolved lifecycle;
+/// this adapter only translates between Grok's question wire shape and the
+/// normalized Comet question bridge.
+fn handle_user_question(
+    id: Value,
+    params: Value,
+    request_input: &std::sync::Arc<RequestInputFn>,
+    client: &RpcClient,
+) {
+    let questions = parse_user_questions(&params);
+    if questions.is_empty() {
+        client.respond_error(&id, -32602, "ask_user_question contained no questions");
+        return;
+    }
+
+    let request_input = std::sync::Arc::clone(request_input);
+    let client = client.clone();
+    tokio::spawn(async move {
+        let answers = (request_input)(questions.clone()).await.unwrap_or_default();
+        client.respond(&id, grok_question_response(&questions, &answers));
+    });
+}
+
+fn parse_user_questions(params: &Value) -> Vec<UserInputQuestion> {
+    params
+        .get("questions")
+        .and_then(Value::as_array)
+        .map(|questions| questions.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .map(|question| UserInputQuestion {
+            id: uuid::Uuid::new_v4().to_string(),
+            header: "Question".into(),
+            question: question
+                .get("question")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .into(),
+            options: question
+                .get("options")
+                .and_then(Value::as_array)
+                .map(|options| options.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|option| option.get("label").and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect(),
+            multi_select: question
+                .get("multiSelect")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
+        .collect()
+}
+
+/// Grok keys answers by question text. Free-form Comet answers use Grok's
+/// `Other` + annotation representation so typed text is not mistaken for an
+/// option label.
+fn grok_question_response(questions: &[UserInputQuestion], answers: &[UserInputAnswer]) -> Value {
+    let mut by_question = serde_json::Map::new();
+    let mut annotations = serde_json::Map::new();
+
+    for question in questions {
+        let Some(answer) = answers
+            .iter()
+            .find(|answer| answer.question_id == question.id)
+        else {
+            continue;
+        };
+        if answer.labels.is_empty() {
+            continue;
+        }
+
+        let mut selected = Vec::new();
+        let mut notes = Vec::new();
+        for label in &answer.labels {
+            if question.options.contains(label) {
+                selected.push(Value::String(label.clone()));
+            } else {
+                notes.push(label.clone());
+            }
+        }
+        if !notes.is_empty() {
+            selected.push(Value::String("Other".into()));
+            annotations.insert(
+                question.question.clone(),
+                json!({ "notes": notes.join(", ") }),
+            );
+        }
+        by_question.insert(question.question.clone(), Value::Array(selected));
+    }
+
+    if by_question.is_empty() {
+        json!({ "outcome": "cancelled" })
+    } else if annotations.is_empty() {
+        json!({ "outcome": "accepted", "answers": by_question })
+    } else {
+        json!({
+            "outcome": "accepted",
+            "answers": by_question,
+            "annotations": annotations,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -883,4 +1013,64 @@ fn send_signal(pid: u32, signal: Signal) {
 #[cfg(not(unix))]
 fn send_signal(_pid: u32, _signal: Signal) {
     // No SIGTERM off unix; `start_kill`/`kill_on_drop` handle termination.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn question() -> UserInputQuestion {
+        UserInputQuestion {
+            id: "q1".into(),
+            header: "Question".into(),
+            question: "Choose one?".into(),
+            options: vec!["a".into(), "b".into()],
+            multi_select: false,
+        }
+    }
+
+    #[test]
+    fn grok_question_response_preserves_selected_labels() {
+        let response = grok_question_response(
+            &[question()],
+            &[UserInputAnswer {
+                question_id: "q1".into(),
+                labels: vec!["b".into()],
+            }],
+        );
+        assert_eq!(
+            response,
+            json!({
+                "outcome": "accepted",
+                "answers": { "Choose one?": ["b"] },
+            })
+        );
+    }
+
+    #[test]
+    fn grok_question_response_uses_annotations_for_freeform() {
+        let response = grok_question_response(
+            &[question()],
+            &[UserInputAnswer {
+                question_id: "q1".into(),
+                labels: vec!["something else".into()],
+            }],
+        );
+        assert_eq!(
+            response,
+            json!({
+                "outcome": "accepted",
+                "answers": { "Choose one?": ["Other"] },
+                "annotations": { "Choose one?": { "notes": "something else" } },
+            })
+        );
+    }
+
+    #[test]
+    fn grok_question_response_cancels_when_no_answers_arrive() {
+        assert_eq!(
+            grok_question_response(&[question()], &[]),
+            json!({ "outcome": "cancelled" })
+        );
+    }
 }

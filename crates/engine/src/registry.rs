@@ -208,13 +208,13 @@ pub fn default_registry() -> HarnessRegistry {
         Box::new(|| Ok(Arc::new(comet_harness::CodexHarness::new()) as Arc<dyn Harness>)),
     );
     // Grok Build: ACP v1 over `grok agent … stdio`. Static descriptor must
-    // mirror GrokBuildHarness exactly (TurnBoundary, Low/Medium/High).
+    // mirror GrokBuildHarness exactly (StepBoundary, Low/Medium/High).
     registry.register_lazy(
         HarnessDescriptor {
             id: HarnessId::GrokBuild,
             name: "Grok Build".into(),
             supports_steering: true,
-            steering_mode: SteeringMode::TurnBoundary,
+            steering_mode: SteeringMode::StepBoundary,
             reasoning_levels: vec![
                 ReasoningLevel::Low,
                 ReasoningLevel::Medium,
@@ -283,7 +283,7 @@ mod tests {
         let grok = registry.resolve(HarnessId::GrokBuild).unwrap();
         assert_eq!(grok.id(), HarnessId::GrokBuild);
         assert_eq!(grok.display_name(), "Grok Build");
-        assert_eq!(grok.steering_mode(), SteeringMode::TurnBoundary);
+        assert_eq!(grok.steering_mode(), SteeringMode::StepBoundary);
     }
 
     /// The Codex lazy descriptor must be indistinguishable from `describe()`
@@ -331,6 +331,6 @@ mod tests {
         assert_eq!(before.steering_mode, after.steering_mode);
         assert_eq!(before.reasoning_levels, after.reasoning_levels);
         assert_eq!(before.name, "Grok Build");
-        assert_eq!(before.steering_mode, SteeringMode::TurnBoundary);
+        assert_eq!(before.steering_mode, SteeringMode::StepBoundary);
     }
 }
