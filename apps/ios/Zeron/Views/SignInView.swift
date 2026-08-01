@@ -8,10 +8,10 @@
 import AuthenticationServices
 import SwiftUI
 
-/// Production cloud endpoints — mirrors edge/wrangler.jsonc.
+/// Personal deploy endpoints (buildr-dev edge + production WorkOS AuthKit).
 enum Endpoints {
-    static let edgeURL = URL(string: "https://edge.zeron.sh")!
-    static let workosClientId = "client_01KWD0EAKZKD50YCQJNYSRE4BY"
+    static let edgeURL = URL(string: "https://comet-native-edge.buildr-9df.workers.dev")!
+    static let workosClientId = "client_01KYXECAJHZ0A07VVNDKMWV3X5"
     static let workosAPIBase = "https://api.workos.com"
     static let callbackScheme = "zeron"
 
