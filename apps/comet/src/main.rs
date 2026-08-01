@@ -57,15 +57,14 @@ enum DaemonCommand {
     Status,
 }
 
-/// Production edge (Cloudflare Worker + Durable Objects on the zeron.sh zone).
-/// `COMET_EDGE_URL` overrides (local dev / self-hosting).
-const DEFAULT_EDGE_URL: &str = "https://edge.comet.zeron.sh";
+/// Personal edge (buildr-dev Cloudflare account). `COMET_EDGE_URL` overrides.
+const DEFAULT_EDGE_URL: &str = "https://comet-native-edge.buildr-9df.workers.dev";
 
-/// Production WorkOS AuthKit client id — public knowledge (it appears in every
-/// authorize URL), so baking it in is safe. Overridden by `COMET_WORKOS_CLIENT_ID`;
-/// set it to the empty string — or set a dev bearer via `COMET_EDGE_TOKEN` — to
-/// force dev-mode auth instead.
-const DEFAULT_WORKOS_CLIENT_ID: &str = "client_01KWD0EAKZKD50YCQJNYSRE4BY";
+/// WorkOS AuthKit client id for this deployment — public knowledge (it appears
+/// in every authorize URL), so baking it in is safe. Overridden by
+/// `COMET_WORKOS_CLIENT_ID`; set it to the empty string — or set a dev bearer
+/// via `COMET_EDGE_TOKEN` — to force dev-mode auth instead.
+const DEFAULT_WORKOS_CLIENT_ID: &str = "client_01KYXECAJHZ0A07VVNDKMWV3X5";
 
 fn edge_url_from_env() -> String {
     std::env::var("COMET_EDGE_URL")
