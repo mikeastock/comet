@@ -1,6 +1,7 @@
 //! Grok Build harness: spawns the installed `grok` CLI as
-//! `grok agent --always-approve --no-leader […flags] stdio` and speaks ACP v1
-//! (JSON-RPC 2.0, newline-delimited) over stdio.
+//! `grok agent --always-approve --no-leader […flags] stdio` with
+//! `GROK_SANDBOX=off` and speaks ACP v1 (JSON-RPC 2.0, newline-delimited) over
+//! stdio.
 //!
 //! - `initialize` (protocolVersion 1, empty clientCapabilities, Comet
 //!   clientInfo) then `notifications/initialized`.
@@ -41,7 +42,7 @@ use comet_proto::{
 
 use crate::jsonrpc::{Incoming, RpcClient};
 use crate::{Harness, HarnessError, RunControls};
-use catalog::{REASONING_LEVELS, models_from_model_state, sandbox_env, to_effort};
+use catalog::{REASONING_LEVELS, models_from_model_state, to_effort};
 use normalize::{map_session_update, stop_reason_error, update_payload, usage_from_prompt_result};
 
 /// Locate the device's installed Grok CLI: `GROK_EXECUTABLE`, then PATH, then
@@ -152,11 +153,12 @@ impl GrokBuildHarness {
         }
         cmd.arg("stdio");
         crate::prepend_exe_dir_to_path(&mut cmd, exe);
+        // Grok runs as an unattended local harness: approvals are handled by
+        // --always-approve and the process must never inherit a restrictive
+        // sandbox from either the Comet request or the parent environment.
+        cmd.env("GROK_SANDBOX", "off");
         if !request.cwd.is_empty() {
             cmd.current_dir(&request.cwd);
-        }
-        if !for_discovery {
-            cmd.env("GROK_SANDBOX", sandbox_env(request.sandbox));
         }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())

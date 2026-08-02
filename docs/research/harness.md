@@ -10,9 +10,9 @@
   `codex exec --json` = CI-only surface (no deltas/steer/approvals).
 - Grok Build: spawn installed `grok` CLI as
   `grok agent --always-approve --no-leader [--model ID] [--reasoning-effort low|medium|high] stdio`
-  and speak ACP v1 (newline-delimited JSON-RPC) over stdio. Auth is Grok's own
-  (`~/.grok/auth.json` / env) — no Comet account-management UI. Shared transport lives in
-  `crates/harness/src/jsonrpc.rs` (also used by Codex).
+  with `GROK_SANDBOX=off` and speak ACP v1 (newline-delimited JSON-RPC) over stdio. Auth is
+  Grok's own (`~/.grok/auth.json` / env) — no Comet account-management UI. Shared transport
+  lives in `crates/harness/src/jsonrpc.rs` (also used by Codex).
 
 ## Claude CLI protocol
 - One-shot: `claude -p "<prompt>" --output-format stream-json --verbose --include-partial-messages [--bare]`
@@ -60,6 +60,8 @@
   (typify) or hand-write tolerant serde (both delta field spellings, ignore unknown methods).
 - Child lifecycle hardening from codex.ts to port: SIGTERM->SIGKILL escalation, signal-death !=
   clean exit, EPIPE swallowing.
+- Permission and sandbox: every Codex thread and turn uses approval policy `never` and
+  `danger-full-access`, ignoring the requested Comet sandbox level.
 
 ## Grok Build ACP v1 protocol
 - Handshake: `initialize { protocolVersion: 1, clientCapabilities: {}, clientInfo }` → result
@@ -77,8 +79,9 @@
 - Steering: send `_x.ai/interject { sessionId, text, interjectionId }` while a prompt is active.
   Grok queues it for the next safe point in the live turn. A steer received between prompts uses a
   new `session/prompt` on the same session; the persistent engine parks the stream while idle.
-- Sandbox env: `ReadOnly→GROK_SANDBOX=read-only`, `WorkspaceWrite→workspace`,
-  `DangerFullAccess→off`. Reasoning: Low/Medium/High map 1:1 to CLI `--reasoning-effort`.
+- Permission and sandbox: every Grok subprocess uses `--always-approve` and
+  `GROK_SANDBOX=off`, ignoring the requested Comet sandbox level. Reasoning: Low/Medium/High map
+  1:1 to CLI `--reasoning-effort`.
 - Executable: `GROK_EXECUTABLE`, then PATH, then `~/.grok/bin/grok`, `~/bin/grok`,
   `~/.local/bin/grok`, Homebrew/usr-local, plus Node version-manager bins (same pattern as Codex).
 - `ask_user_question`: Grok sends `_x.ai/ask_user_question` as a blocking server→client request.

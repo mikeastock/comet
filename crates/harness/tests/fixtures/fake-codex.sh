@@ -52,12 +52,13 @@ case "$turnline" in
 *scenario:happy*)
   # Verify the turn/start + thread/start params the harness must send.
   for want in '"method":"turn/start"' '"effort":"ultra"' '"model":"gpt-5.6-sol"' \
-    '"networkAccess":true' '"type":"workspaceWrite"' \
+    '"type":"dangerFullAccess"' \
     '"approvalPolicy":"never"' '"summary":"auto"' \
     '"serviceTier":"fast"'; do
     has "$turnline" "$want" || { fail_turn "$tid" "turn param missing: $want"; exit 0; }
   done
-  for want in '"approvalPolicy":"never"' '"sandbox":"workspace-write"' '"cwd":"/tmp"' \
+  has "$turnline" '"networkAccess"' && { fail_turn "$tid" "danger-full-access must not send networkAccess"; exit 0; }
+  for want in '"approvalPolicy":"never"' '"sandbox":"danger-full-access"' '"cwd":"/tmp"' \
     '"serviceTier":"fast"'; do
     has "$thread_line" "$want" || { fail_turn "$tid" "thread param missing: $want"; exit 0; }
   done

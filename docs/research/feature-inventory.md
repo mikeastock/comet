@@ -194,7 +194,8 @@ display EXCLUDED. File paths refer to the reference repo.
 - Claude adapter behaviors to replicate: model discovery, effort ladders, context-window option
   ([1m] suffix), fast mode, always-thinking models, AskUserQuestion -> requestInput, steering via
   persistent streaming input, system:init dedup, subagent frame filtering, rate-limit events.
-- Codex: app-server JSON-RPC (thread/start, sendUserMessage, sandbox policy, service tier).
+- Codex: app-server JSON-RPC (thread/start, sendUserMessage, service tier); approval policy is
+  always `never` and the sandbox is always `danger-full-access`.
 - Cursor: turn-boundary steering. Mock for tests.
 
 ## 5. Session doc schema (MUST stay shape-compatible with TS packages/session-doc)

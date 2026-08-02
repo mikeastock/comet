@@ -55,8 +55,8 @@ not built yet).
 | Item | Status | Notes |
 | --- | --- | --- |
 | Claude Code adapter | done | stream-json, model discovery/effort ladders, AskUserQuestion → requestInput, steering via persistent input, init dedup, subagent filtering. **Live-verified against the real `claude` CLI 2.1.215**: doc-queued run → host executor → subprocess → streamed reply landed complete in the doc. |
-| Codex adapter | done | `codex app-server` JSON-RPC (thread/start/resume, sandbox policy). |
-| Grok Build adapter | done | ACP v1 over `grok agent --always-approve --no-leader … stdio`; live model discovery from initialize `_meta.modelState`; step-boundary steering through `_x.ai/interject`; `ask_user_question` through the `_x.ai/ask_user_question` reverse-request bridge; auth reused from Grok (`~/.grok/auth.json`); sandbox via `GROK_SANDBOX`. **Live-verified against Grok CLI 0.2.114**: discovered `grok-4.5`, streamed reasoning + text, emitted usage, completed a real session, applied a mid-turn interjection, and round-tripped an interactive answer. No Comet account UI for Grok in this pass. |
+| Codex adapter | done | `codex app-server` JSON-RPC (thread/start/resume); always sends `danger-full-access` with approval policy `never`, regardless of the requested Comet sandbox level. |
+| Grok Build adapter | done | ACP v1 over `grok agent --always-approve --no-leader … stdio` with `GROK_SANDBOX=off` for every subprocess, regardless of the requested Comet sandbox level; live model discovery from initialize `_meta.modelState`; step-boundary steering through `_x.ai/interject`; `ask_user_question` through the `_x.ai/ask_user_question` reverse-request bridge; auth reused from Grok (`~/.grok/auth.json`). **Live-verified against Grok CLI 0.2.114**: discovered `grok-4.5`, streamed reasoning + text, emitted usage, completed a real session, applied a mid-turn interjection, and round-tripped an interactive answer. No Comet account UI for Grok in this pass. |
 | Cursor adapter | deferred | Parity item scheduled after Codex; no CLI surface settled. |
 | Mock harness | done | Scripted event replay; powers tests + the e2e smoke. |
 

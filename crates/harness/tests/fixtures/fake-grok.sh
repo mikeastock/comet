@@ -11,14 +11,11 @@ has() { case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
 
 case "$*" in
   "agent --always-approve --no-leader stdio") ;;
-  "agent --always-approve --no-leader --model grok-4.5 --reasoning-effort low stdio")
-    [ "$GROK_SANDBOX" = "workspace" ] || exit 1
-    ;;
-  "agent --always-approve --no-leader --reasoning-effort low stdio")
-    [ "$GROK_SANDBOX" = "workspace" ] || exit 1
-    ;;
+  "agent --always-approve --no-leader --model grok-4.5 --reasoning-effort low stdio") ;;
+  "agent --always-approve --no-leader --reasoning-effort low stdio") ;;
   *) exit 1 ;;
 esac
+[ "$GROK_SANDBOX" = "off" ] || exit 1
 # ---- handshake -------------------------------------------------------------
 read -r line || exit 1 # initialize
 has "$line" '"method":"initialize"' || exit 1

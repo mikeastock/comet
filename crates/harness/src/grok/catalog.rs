@@ -1,10 +1,10 @@
-//! Model catalog helpers + effort/sandbox mapping for Grok Build.
+//! Model catalog helpers + effort mapping for Grok Build.
 //!
 //! Models are discovered live from an ACP `initialize` handshake
-//! (`_meta.modelState`). This module only maps reasoning / sandbox wire values
-//! and turns raw modelState into [`Model`] rows.
+//! (`_meta.modelState`). This module maps reasoning wire values and turns raw
+//! modelState into [`Model`] rows.
 
-use comet_proto::{Model, ReasoningLevel, SandboxLevel};
+use comet_proto::{Model, ReasoningLevel};
 use serde_json::Value;
 
 /// Grok Build accepts exactly Low / Medium / High on the CLI
@@ -22,15 +22,6 @@ pub(crate) fn to_effort(reasoning: Option<ReasoningLevel>) -> Option<&'static st
         Some(ReasoningLevel::Medium) => Some("medium"),
         Some(ReasoningLevel::High) => Some("high"),
         _ => None,
-    }
-}
-
-/// Map a Comet sandbox level into the child's `GROK_SANDBOX` env value.
-pub(crate) fn sandbox_env(sandbox: SandboxLevel) -> &'static str {
-    match sandbox {
-        SandboxLevel::ReadOnly => "read-only",
-        SandboxLevel::WorkspaceWrite => "workspace",
-        SandboxLevel::DangerFullAccess => "off",
     }
 }
 
@@ -180,13 +171,6 @@ mod tests {
         ] {
             assert_eq!(to_effort(Some(unsupported)), None);
         }
-    }
-
-    #[test]
-    fn sandbox_env_values() {
-        assert_eq!(sandbox_env(SandboxLevel::ReadOnly), "read-only");
-        assert_eq!(sandbox_env(SandboxLevel::WorkspaceWrite), "workspace");
-        assert_eq!(sandbox_env(SandboxLevel::DangerFullAccess), "off");
     }
 
     #[test]
