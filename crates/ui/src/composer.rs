@@ -14,13 +14,13 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyTooltip, App, BorderStyle, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle,
-    DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, GlobalElementId, KeyBinding, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ObjectFit, PaintQuad, PathPromptOptions, Pixels, Point,
-    ScrollWheelEvent, SharedString, Style, StyledImage as _, Subscription, Task, TextRun,
-    TextStyle, UTF16Selection, UnderlineStyle, Window, WrappedLine, actions, div, fill, img, point,
-    prelude::*, px, quad, relative, size,
+    AccessibleAction, AnyTooltip, App, BorderStyle, Bounds, ClipboardEntry, ClipboardItem, Context,
+    CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, EventEmitter,
+    FocusHandle, Focusable, GlobalElementId, KeyBinding, KeyDownEvent, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, PaintQuad, PathPromptOptions, Pixels,
+    Point, Role, ScrollWheelEvent, SharedString, Style, StyledImage as _, Subscription, Task,
+    TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, WrappedLine, accesskit, actions,
+    div, fill, img, point, prelude::*, px, quad, relative, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -2055,6 +2055,19 @@ impl ComposerInput {
         }
     }
 
+    /// Accessibility `SetValue`: replace the whole document (Willow / Wispr Flow
+    /// and friends set AXValue on the focused text area).
+    fn a11y_set_value(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let end = self.offset_to_utf16(self.content.len());
+        self.replace_text_in_range(Some(0..end), text, window, cx);
+    }
+
+    /// Accessibility `ReplaceSelectedText`: insert/replace at the caret —
+    /// AccessKit's paste/type equivalent.
+    fn a11y_replace_selected(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.replace_text_in_range(None, text, window, cx);
+    }
+
     fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
         self.replace_text_in_range(None, "\n", window, cx);
     }
@@ -2988,9 +3001,73 @@ impl Render for ComposerInput {
         } else {
             theme.text
         };
+        // Expose a real AX text area so macOS dictation apps (Willow, Wispr
+        // Flow, …) can find the focused field and set/paste via Accessibility.
+        // Without an id + role the hand-rolled input is invisible to AT.
+        let a11y_value = self.content.clone();
+        let a11y_placeholder = self.placeholder.clone();
+        let a11y_label = self.placeholder.clone();
+        let sel_start = self.selected_range.start.min(self.content.len());
+        let sel_end = self.selected_range.end.min(self.content.len());
+        let weak = cx.entity().downgrade();
+        let weak_replace = weak.clone();
         div()
+            .id(("composer-input", cx.entity_id()))
             .key_context(self.key_context)
             .track_focus(&self.focus_handle)
+            .role(Role::MultilineTextInput)
+            .aria_label(a11y_label)
+            .aria_value(a11y_value.clone())
+            .aria_placeholder(a11y_placeholder)
+            .a11y_synthetic_children({
+                let text = a11y_value;
+                move |builder| {
+                    // One TextRun is enough for caret/selection + AX value
+                    // splicing; word_starts is omitted so we need not chunk at
+                    // 255 chars (that limit only applies to u8 word indices).
+                    let mut run = accesskit::Node::new(Role::TextRun);
+                    run.set_value(text.clone());
+                    run.set_character_lengths(
+                        text.chars().map(|c| c.len_utf8() as u8).collect::<Vec<_>>(),
+                    );
+                    let run_id = builder.synthetic_node_id(0);
+                    builder.push_child(run_id, run);
+                    let anchor = text[..sel_start].chars().count();
+                    let focus = text[..sel_end].chars().count();
+                    builder.parent_node().set_text_selection(accesskit::TextSelection {
+                        anchor: accesskit::TextPosition {
+                            node: run_id,
+                            character_index: anchor,
+                        },
+                        focus: accesskit::TextPosition {
+                            node: run_id,
+                            character_index: focus,
+                        },
+                    });
+                }
+            })
+            .on_a11y_action(AccessibleAction::SetValue, move |data, window, cx| {
+                let Some(accesskit::ActionData::Value(text)) = data else {
+                    return;
+                };
+                let Some(entity) = weak.upgrade() else {
+                    return;
+                };
+                entity.update(cx, |input, cx| {
+                    input.a11y_set_value(text, window, cx);
+                });
+            })
+            .on_a11y_action(AccessibleAction::ReplaceSelectedText, move |data, window, cx| {
+                let Some(accesskit::ActionData::Value(text)) = data else {
+                    return;
+                };
+                let Some(entity) = weak_replace.upgrade() else {
+                    return;
+                };
+                entity.update(cx, |input, cx| {
+                    input.a11y_replace_selected(text, window, cx);
+                });
+            })
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))

@@ -190,6 +190,33 @@ pub fn apply(cx: &mut App) {
     reapply_window_background(cx);
 }
 
+/// Install AccessKit's window-level `accessibilityFocusedUIElement` forwarder
+/// on GPUI's `NSWindow` subclasses.
+///
+/// AccessKit mounts its tree on the content view. Dictation tools (Willow,
+/// Wispr Flow, …) ask the *application* for the focused UI element; AppKit
+/// resolves that through the key window. Without this forwarder the window
+/// itself is returned as focused, so those tools never see the composer's
+/// `AXTextArea` even when keyboard focus and AccessKit's tree focus are
+/// correct. AccessKit documents this for non-AppKit-first windowing stacks
+/// (`accesskit_macos::add_focus_forwarder_to_window_class`).
+///
+/// Safe to call once at process start; the class methods are registered under
+/// `#[ctor]` when `gpui_macos` loads, so `GPUIWindow` / `GPUIPanel` already
+/// exist by the time `run_app` runs.
+#[cfg(target_os = "macos")]
+pub fn install_ax_focus_forwarder() {
+    // SAFETY: classes are registered for the process lifetime; the AccessKit
+    // crate is statically linked into this binary so the IMP never unloads.
+    unsafe {
+        accesskit_macos::add_focus_forwarder_to_window_class("GPUIWindow");
+        accesskit_macos::add_focus_forwarder_to_window_class("GPUIPanel");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn install_ax_focus_forwarder() {}
+
 /// Tell AppKit which appearance the app's windows use, so the chrome *it*
 /// draws — the traffic lights above all — matches the palette *we* paint.
 /// gpui never sets `NSAppearance`, so before this a pinned in-app theme left

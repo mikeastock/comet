@@ -30,6 +30,9 @@ tracing.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
+# Same rev gpui_macos pins — used only to install AccessKit's window-level
+# accessibilityFocusedUIElement forwarder (see `appearance::install_ax_focus_forwarder`).
+accesskit_macos = "0.26.3"
 
 [dev-dependencies]
 tempfile.workspace = true

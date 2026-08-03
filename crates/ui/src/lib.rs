@@ -121,6 +121,10 @@ impl gpui::Global for ReopenState {}
 /// root view, boot splash overlaid until the engine reports ready.
 pub fn run_app(config: UiConfig) {
     let app = gpui_platform::application().with_assets(icons::Assets);
+    // After the platform crate loads (so GPUIWindow/GPUIPanel exist) but before
+    // any window is created: make AX clients resolve focusedUIElement through
+    // AccessKit (composer text area) instead of the bare NSWindow.
+    appearance::install_ax_focus_forwarder();
     // Dock-icon click with no window (⌘W closed it): rebuild the main window
     // around the still-running engine — zed does the same via `on_reopen`
     // (crates/zed/src/main.rs `app.on_reopen`).
