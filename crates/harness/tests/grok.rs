@@ -232,6 +232,39 @@ async fn step_boundary_steer_interjects_into_active_prompt() {
 }
 
 #[tokio::test]
+async fn request_permission_is_auto_allowed() {
+    let (controls, steer_tx, _token) = controls();
+    let events = run_to_end(
+        &harness(),
+        request("scenario:permission"),
+        controls,
+        steer_tx,
+    )
+    .await;
+
+    assert!(events.contains(&AgentEvent::ToolCall {
+        id: "call-shell".into(),
+        call: ToolCall::Exec {
+            command: "strings /usr/bin/true".into()
+        },
+    }));
+    assert!(events.contains(&AgentEvent::ToolResult {
+        id: "call-shell".into(),
+        is_error: false
+    }));
+    assert!(events.contains(&AgentEvent::TextDelta {
+        text: "permitted".into()
+    }));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::Done {
+            status: DoneStatus::Completed,
+            ..
+        }
+    )));
+}
+
+#[tokio::test]
 async fn ask_user_question_round_trips_through_input_bridge() {
     let seen_questions = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&seen_questions);

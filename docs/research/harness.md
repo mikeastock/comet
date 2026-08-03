@@ -68,8 +68,9 @@
   carries `agentCapabilities.loadSession`, prompt caps (image/audio false, text/embeddedContext
   true), auth methods, and `_meta.modelState` (`currentModelId` + `availableModels` with
   reasoningEfforts). Then `notifications/initialized`.
-- `session/new { cwd, mcpServers: [] }` → `sessionId`; resume via `session/load { sessionId, cwd,
-  mcpServers }` with fallback to `session/new` on failure (debug log).
+- `session/new { cwd, mcpServers: [], _meta: { yoloMode: true } }` → `sessionId`; resume via
+  `session/load { sessionId, cwd, mcpServers }` with fallback to `session/new` on failure
+  (debug log).
 - `session/prompt { sessionId, prompt: [{type:"text", text}] }` — response after the turn with
   `stopReason` + `_meta.usage` (inputTokens/outputTokens). Streaming arrives as
   `session/update` notifications: `agent_message_chunk` / `agent_thought_chunk` content blocks,
@@ -80,8 +81,11 @@
   Grok queues it for the next safe point in the live turn. A steer received between prompts uses a
   new `session/prompt` on the same session; the persistent engine parks the stream while idle.
 - Permission and sandbox: every Grok subprocess uses `--always-approve` and
-  `GROK_SANDBOX=off`, ignoring the requested Comet sandbox level. Reasoning: Low/Medium/High map
-  1:1 to CLI `--reasoning-effort`.
+  `GROK_SANDBOX=off`, ignoring the requested Comet sandbox level. Session `_meta.yoloMode: true`
+  reinforces always-approve. Residual `session/request_permission` reverse requests (opaque shell
+  floors / shell ask rules that still prompt under always-approve) are auto-approved by selecting
+  `allow_always` (else `allow_once`) so the unattended harness never surfaces a TUI permission
+  failure. Reasoning: Low/Medium/High map 1:1 to CLI `--reasoning-effort`.
 - Executable: `GROK_EXECUTABLE`, then PATH, then `~/.grok/bin/grok`, `~/bin/grok`,
   `~/.local/bin/grok`, Homebrew/usr-local, plus Node version-manager bins (same pattern as Codex).
 - `ask_user_question`: Grok sends `_x.ai/ask_user_question` as a blocking server→client request.

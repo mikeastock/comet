@@ -16,6 +16,10 @@
 //! - Interrupt: `session/cancel` notification, then SIGTERM → SIGKILL; stream
 //!   ends with `Done { status: Interrupted }`.
 //! - Auth is Grok's own (`~/.grok/auth.json` / env). No Comet account UI.
+//! - Permissions: every subprocess uses `--always-approve` and
+//!   `session/new`/`session/load` set `_meta.yoloMode: true`. Residual ACP
+//!   `session/request_permission` reverse requests (opaque shell floors, ask
+//!   rules) are auto-approved — Comet is unattended and has no TUI prompter.
 //! - Grok's `_x.ai/ask_user_question` reverse request is bridged through
 //!   [`RunControls::request_input`] and answered on the ACP connection.
 
@@ -373,6 +377,58 @@ fn prompt_content(text: &str) -> Value {
     json!([{ "type": "text", "text": text }])
 }
 
+/// `session/new` params: cwd, empty MCP list, and yolo so Grok's session-level
+/// always-approve matches the CLI flag (belt-and-suspenders for residual
+/// permission floors).
+fn session_new_params(cwd: &str) -> Value {
+    json!({
+        "cwd": cwd,
+        "mcpServers": [],
+        "_meta": { "yoloMode": true },
+    })
+}
+
+/// Auto-approve an ACP `session/request_permission` reverse request.
+///
+/// Prefer `allow_always`, then `allow_once`, then any optionId starting with
+/// `allow`, finally the protocol default `allow-once`.
+fn permission_auto_allow_response(params: &Value) -> Value {
+    let option_id =
+        select_permission_allow_option(params).unwrap_or_else(|| "allow-once".to_owned());
+    json!({
+        "outcome": {
+            "outcome": "selected",
+            "optionId": option_id,
+        }
+    })
+}
+
+fn select_permission_allow_option(params: &Value) -> Option<String> {
+    let options = params.get("options")?.as_array()?;
+    for kind in ["allow_always", "allow_once"] {
+        if let Some(id) = options.iter().find_map(|option| {
+            if option.get("kind").and_then(Value::as_str) == Some(kind) {
+                option
+                    .get("optionId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            } else {
+                None
+            }
+        }) {
+            return Some(id);
+        }
+    }
+    options.iter().find_map(|option| {
+        let id = option.get("optionId").and_then(Value::as_str)?;
+        if id.starts_with("allow") {
+            Some(id.to_owned())
+        } else {
+            None
+        }
+    })
+}
+
 type RequestInputFn = Box<
     dyn Fn(Vec<UserInputQuestion>) -> tokio::sync::oneshot::Receiver<Vec<UserInputAnswer>>
         + Send
@@ -450,7 +506,7 @@ async fn run_session(session: Session) {
                         "session/load failed (starting fresh): {e}"
                     );
                     let result = client
-                        .request("session/new", json!({ "cwd": cwd, "mcpServers": [] }))
+                        .request("session/new", session_new_params(&cwd))
                         .await?;
                     result
                         .get("sessionId")
@@ -461,7 +517,7 @@ async fn run_session(session: Session) {
             }
         } else {
             let result = client
-                .request("session/new", json!({ "cwd": cwd, "mcpServers": [] }))
+                .request("session/new", session_new_params(&cwd))
                 .await?;
             result
                 .get("sessionId")
@@ -569,7 +625,14 @@ async fn run_session(session: Session) {
                 }
 
                 Some(Incoming::Request { id, method, params }) => {
-                    if method == "_x.ai/ask_user_question" {
+                    if method == "session/request_permission" {
+                        // Unattended harness: auto-approve residual prompts that
+                        // still fire under --always-approve (opaque shell floors,
+                        // shell ask rules). Without this, Grok reports
+                        // "Failed to request permission from user" and cancels
+                        // the turn.
+                        client.respond(&id, permission_auto_allow_response(&params));
+                    } else if method == "_x.ai/ask_user_question" {
                         handle_user_question(
                             id,
                             params,
@@ -1073,6 +1136,67 @@ mod tests {
         assert_eq!(
             grok_question_response(&[question()], &[]),
             json!({ "outcome": "cancelled" })
+        );
+    }
+
+    #[test]
+    fn permission_auto_allow_prefers_allow_always() {
+        let params = json!({
+            "sessionId": "sess-1",
+            "toolCall": { "toolCallId": "call-1" },
+            "options": [
+                { "optionId": "reject-once", "name": "Reject", "kind": "reject_once" },
+                { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
+                { "optionId": "allow-always", "name": "Always allow", "kind": "allow_always" },
+            ]
+        });
+        assert_eq!(
+            permission_auto_allow_response(&params),
+            json!({
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "allow-always",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn permission_auto_allow_falls_back_to_allow_once() {
+        let params = json!({
+            "options": [
+                { "optionId": "reject-once", "kind": "reject_once" },
+                { "optionId": "allow-once", "kind": "allow_once" },
+            ]
+        });
+        assert_eq!(
+            select_permission_allow_option(&params).as_deref(),
+            Some("allow-once")
+        );
+    }
+
+    #[test]
+    fn permission_auto_allow_defaults_when_options_missing() {
+        assert_eq!(
+            permission_auto_allow_response(&json!({})),
+            json!({
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "allow-once",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn session_new_params_enable_yolo_mode() {
+        assert_eq!(
+            session_new_params("/tmp/project"),
+            json!({
+                "cwd": "/tmp/project",
+                "mcpServers": [],
+                "_meta": { "yoloMode": true },
+            })
         );
     }
 }

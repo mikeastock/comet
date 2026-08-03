@@ -40,6 +40,8 @@ if has "$line" '"method":"session/load"'; then
     emit "{\"id\":$(rid "$line"),\"result\":{\"sessionId\":\"sess-resumed\"}}"
   fi
 elif has "$line" '"method":"session/new"'; then
+  # Comet always-approves unattended sessions via CLI + session _meta.
+  has "$line" '"yoloMode":true' || exit 1
   emit "{\"id\":$(rid "$line"),\"result\":{\"sessionId\":\"sess-1\"}}"
 else
   exit 1
@@ -102,6 +104,21 @@ while read -r promptline; do
       emit "{\"id\":$pid,\"result\":{\"stopReason\":\"end_turn\",\"_meta\":{\"usage\":{\"inputTokens\":2,\"outputTokens\":1}}}}"
     else
       emit "{\"id\":$pid,\"error\":{\"code\":-32600,\"message\":\"invalid question response\"}}"
+    fi
+    ;;
+
+  *scenario:permission*)
+    # Residual permission prompt that still fires under --always-approve.
+    # Comet must auto-select an allow option or the turn is cancelled.
+    emit '{"method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"tool_call","toolCallId":"call-shell","title":"run_terminal_command","rawInput":{"command":"strings /usr/bin/true"},"_meta":{"x.ai/tool":{"name":"run_terminal_command","input":{"command":"strings /usr/bin/true"}}}}}}'
+    emit '{"jsonrpc":"2.0","id":901,"method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"call-shell","title":"run_terminal_command"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Always allow","kind":"allow_always"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}'
+    read -r permlines || exit 1
+    if has "$permlines" '"id":901' && has "$permlines" '"outcome":"selected"' && has "$permlines" '"optionId":"allow-always"'; then
+      emit '{"method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-shell","status":"completed","rawOutput":{"ok":true}}}}'
+      emit '{"method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"permitted"}}}}'
+      emit "{\"id\":$pid,\"result\":{\"stopReason\":\"end_turn\",\"_meta\":{\"usage\":{\"inputTokens\":3,\"outputTokens\":1}}}}"
+    else
+      emit "{\"id\":$pid,\"error\":{\"code\":-32600,\"message\":\"expected session/request_permission auto-allow\"}}"
     fi
     ;;
 
