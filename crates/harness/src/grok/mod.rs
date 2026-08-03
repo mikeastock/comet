@@ -152,7 +152,7 @@ impl GrokBuildHarness {
             }
         }
         cmd.arg("stdio");
-        crate::prepend_exe_dir_to_path(&mut cmd, exe);
+        crate::compose_child_path(&mut cmd, exe);
         // Grok runs as an unattended local harness: approvals are handled by
         // --always-approve and the process must never inherit a restrictive
         // sandbox from either the Comet request or the parent environment.
