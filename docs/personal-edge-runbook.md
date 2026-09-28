@@ -195,7 +195,7 @@ strings target/release/zeron | rg 'buildr-internal-tools|client_01KYX'
 
 ## 3. Rebuild the Mac app
 
-On the Mac, on the personal-edge branch:
+Follow [personal-edge-mac.md](personal-edge-mac.md). Short form, on the Mac, on this branch:
 
 ```sh
 # from repo root
